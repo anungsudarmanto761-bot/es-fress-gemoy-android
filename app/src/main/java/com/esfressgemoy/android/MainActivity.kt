@@ -5,265 +5,223 @@ import android.app.Activity
 import android.app.DownloadManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.PermissionRequest
-import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private lateinit var webView: WebView
-    private var filePathCallback: ValueCallback<Array<Uri>>? = null
-    private var pendingCameraRequest: PermissionRequest? = null
+    private var webView: WebView? = null
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var cameraRequest: PermissionRequest? = null
 
-    private companion object {
-        const val FILE_CHOOSER_CODE = 1001
-        const val CAMERA_PERMISSION_CODE = 1002
-        const val APP_URL = "https://es-fress-gemoy.hatchable.site"
+    companion object {
+        private const val URL = "https://es-fress-gemoy.hatchable.site"
+        private const val FILE_PICKER = 1001
+        private const val CAMERA = 1002
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        webView = WebView(this)
-        setContentView(webView)
-        WebView.setWebContentsDebuggingEnabled(false)
-
-        configureWebView()
-
-        if (savedInstanceState == null) {
-            webView.loadUrl(APP_URL)
-        } else {
-            webView.restoreState(savedInstanceState)
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
+        try {
+            createWebView()
+            webView?.loadUrl(URL)
+        } catch (e: Throwable) {
+            showError()
         }
     }
 
-    private fun configureWebView() {
-        webView.settings.apply {
+    private fun createWebView() {
+        val w = WebView(this)
+        webView = w
+        setContentView(w)
+
+        w.setBackgroundColor(Color.WHITE)
+        w.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = true
             allowFileAccess = true
             allowContentAccess = true
             javaScriptCanOpenWindowsAutomatically = true
-            setSupportMultipleWindows(false)
+            mediaPlaybackRequiresUserGesture = false
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
-            cacheMode = WebSettings.LOAD_DEFAULT
-            mediaPlaybackRequiresUserGesture = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
 
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, true)
-            flush()
-        }
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
 
-        webView.webViewClient = object : WebViewClient() {
+        w.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest
-            ): Boolean {
-                // Keep the entire Es Fress Gemoy application inside the WebView.
-                return false
+            ): Boolean = false
+
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: android.webkit.WebResourceError
+            ) {
+                if (request.isForMainFrame) {
+                    view.postDelayed({ view.loadUrl(URL) }, 800)
+                }
             }
 
-            override fun onPageFinished(view: WebView, url: String) {
-                super.onPageFinished(view, url)
-                CookieManager.getInstance().flush()
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: android.webkit.RenderProcessGoneDetail
+            ): Boolean {
+                try {
+                    view.destroy()
+                } catch (_: Exception) {}
+                createWebView()
+                webView?.postDelayed({ webView?.loadUrl(URL) }, 300)
+                return true
             }
         }
 
-        webView.webChromeClient = object : WebChromeClient() {
-
+        w.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 view: WebView,
                 callback: ValueCallback<Array<Uri>>,
                 params: FileChooserParams
             ): Boolean {
-                filePathCallback?.onReceiveValue(null)
-                filePathCallback = callback
-
+                fileCallback?.onReceiveValue(null)
+                fileCallback = callback
                 return try {
-                    val intent = params.createIntent().apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                    }
-                    startActivityForResult(intent, FILE_CHOOSER_CODE)
+                    startActivityForResult(
+                        params.createIntent().addCategory(Intent.CATEGORY_OPENABLE),
+                        FILE_PICKER
+                    )
                     true
                 } catch (_: Exception) {
-                    filePathCallback = null
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Tidak dapat membuka pemilih file",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    fileCallback = null
                     false
                 }
             }
 
             override fun onPermissionRequest(request: PermissionRequest) {
                 runOnUiThread {
-                    val wantsCamera = request.resources
-                        .contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
-
-                    if (!wantsCamera) {
+                    if (!request.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
                         request.deny()
                         return@runOnUiThread
                     }
-
-                    if (checkSelfPermission(Manifest.permission.CAMERA)
-                        == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        request.grant(
-                            arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
-                        )
+                    if (checkSelfPermission(Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED) {
+                        request.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
                     } else {
-                        pendingCameraRequest?.deny()
-                        pendingCameraRequest = request
-                        requestPermissions(
-                            arrayOf(Manifest.permission.CAMERA),
-                            CAMERA_PERMISSION_CODE
-                        )
+                        cameraRequest?.deny()
+                        cameraRequest = request
+                        requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA)
                     }
                 }
             }
         }
 
-        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            downloadFile(url, userAgent, contentDisposition, mimeType)
-        }
-    }
-
-    private fun downloadFile(
-        url: String,
-        userAgent: String,
-        contentDisposition: String,
-        mimeType: String
-    ) {
-        try {
-            val request = DownloadManager.Request(Uri.parse(url)).apply {
-                setMimeType(mimeType)
-                setTitle(URLUtil.guessFileName(url, contentDisposition, mimeType))
-                setDescription("Es Fress Gemoy")
-                addRequestHeader("User-Agent", userAgent)
+        w.setDownloadListener { url, userAgent, disposition, mimeType, _ ->
+            try {
+                val name = android.webkit.URLUtil.guessFileName(url, disposition, mimeType)
+                val req = DownloadManager.Request(Uri.parse(url))
+                    .setTitle(name)
+                    .setDescription("Es Fress Gemoy")
+                    .setMimeType(mimeType)
+                    .addRequestHeader("User-Agent", userAgent)
+                    .setNotificationVisibility(
+                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                    )
+                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
                 CookieManager.getInstance().getCookie(url)?.let {
-                    addRequestHeader("Cookie", it)
+                    req.addRequestHeader("Cookie", it)
                 }
-                setNotificationVisibility(
-                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                )
-                setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_DOWNLOADS,
-                    URLUtil.guessFileName(url, contentDisposition, mimeType)
-                )
-                setAllowedOverMetered(true)
-                setAllowedOverRoaming(true)
+                (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
+                Toast.makeText(this, "Download dimulai", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {
+                Toast.makeText(this, "Download gagal", Toast.LENGTH_SHORT).show()
             }
-
-            val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-            manager.enqueue(request)
-
-            Toast.makeText(
-                this,
-                "Download dimulai. Cek folder Download.",
-                Toast.LENGTH_SHORT
-            ).show()
-        } catch (_: Exception) {
-            Toast.makeText(
-                this,
-                "Download gagal",
-                Toast.LENGTH_SHORT
-            ).show()
         }
     }
 
-    private fun requestCameraPermission() {
-        requestPermissions(
-            arrayOf(Manifest.permission.CAMERA),
-            CAMERA_PERMISSION_CODE
-        )
+    private fun showError() {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 120, 48, 48)
+            setBackgroundColor(Color.WHITE)
+        }
+        val title = TextView(this).apply {
+            text = "Es Fress Gemoy"
+            textSize = 28f
+            setTextColor(Color.rgb(21, 128, 61))
+        }
+        val msg = TextView(this).apply {
+            text = "\nAplikasi gagal memuat halaman.\nPeriksa koneksi internet lalu buka kembali."
+            textSize = 17f
+            setTextColor(Color.DKGRAY)
+        }
+        box.addView(title)
+        box.addView(msg)
+        setContentView(box)
     }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
-        grantResults: IntArray
+        results: IntArray
     ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-
-        if (requestCode != CAMERA_PERMISSION_CODE) return
-
-        val request = pendingCameraRequest
-        pendingCameraRequest = null
-
-        if (grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED &&
-            request != null
-        ) {
-            request.grant(
-                arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
-            )
-        } else {
-            request?.deny()
-        }
-    }
-
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?
-    ) {
-        super.onActivityResult(requestCode, resultCode, data)
-
-        if (requestCode == FILE_CHOOSER_CODE) {
-            val result = if (resultCode == RESULT_OK && data != null) {
-                WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+        super.onRequestPermissionsResult(requestCode, permissions, results)
+        if (requestCode == CAMERA) {
+            val r = cameraRequest
+            cameraRequest = null
+            if (results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED) {
+                r?.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
             } else {
-                null
+                r?.deny()
             }
-
-            filePathCallback?.onReceiveValue(result)
-            filePathCallback = null
         }
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        webView.saveState(outState)
-        super.onSaveInstanceState(outState)
+    @Deprecated("Deprecated in Android API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == FILE_PICKER) {
+            val result = if (resultCode == RESULT_OK && data != null)
+                WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+            else null
+            fileCallback?.onReceiveValue(result)
+            fileCallback = null
+        }
     }
 
-    @Suppress("DEPRECATION")
+    @Deprecated("Deprecated in Android API")
     override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
-        }
+        val w = webView
+        if (w != null && w.canGoBack()) w.goBack() else super.onBackPressed()
     }
 
     override fun onDestroy() {
-        pendingCameraRequest?.deny()
-        pendingCameraRequest = null
-
-        filePathCallback?.onReceiveValue(null)
-        filePathCallback = null
-
-        webView.stopLoading()
-        webView.webChromeClient = null
-        webView.webViewClient = null
-        webView.destroy()
-
+        cameraRequest?.deny()
+        cameraRequest = null
+        fileCallback?.onReceiveValue(null)
+        fileCallback = null
+        webView?.apply {
+            stopLoading()
+            webChromeClient = null
+            webViewClient = null
+            destroy()
+        }
+        webView = null
         super.onDestroy()
     }
 }
