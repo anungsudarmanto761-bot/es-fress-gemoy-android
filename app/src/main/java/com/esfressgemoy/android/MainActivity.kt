@@ -7,8 +7,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.webkit.*
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
@@ -59,7 +57,7 @@ class MainActivity : Activity() {
 
             override fun onPermissionRequest(request: PermissionRequest) {
                 runOnUiThread {
-                    if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA)
+                    if (checkSelfPermission(Manifest.permission.CAMERA)
                         == PackageManager.PERMISSION_GRANTED) {
                         request.grant(request.resources.filter {
                             it == PermissionRequest.RESOURCE_VIDEO_CAPTURE
@@ -94,7 +92,7 @@ class MainActivity : Activity() {
     }
 
     private fun requestCameraPermission() {
-        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), cameraCode)
+        requestPermissions(arrayOf(Manifest.permission.CAMERA), cameraCode)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
